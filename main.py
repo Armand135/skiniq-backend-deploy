@@ -11,7 +11,6 @@ import os
 
 app = FastAPI()
 
-# Allow CORS for frontend calls
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,7 +19,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Download model from Hugging Face if not exists
 MODEL_URL = "https://huggingface.co/YOUR_USERNAME/skiniq-model/resolve/main/skin_model.pth"
 MODEL_PATH = "skin_model.pth"
 
@@ -30,13 +28,11 @@ if not os.path.exists(MODEL_PATH):
     with open(MODEL_PATH, "wb") as f:
         f.write(r.content)
 
-# Load model
 model = models.resnet18(pretrained=False)
 model.fc = nn.Linear(model.fc.in_features, 7)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device("cpu")))
+model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device("cpu"), weights_only=False))
 model.eval()
 
-# Image transform
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),

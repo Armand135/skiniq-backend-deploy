@@ -1,17 +1,10 @@
-SkinIQ Backend Deployment Instructions (Render)
+SkinIQ Backend Render Deployment (Fully Fixed)
 
-1️⃣ Upload code to GitHub repository.
+✅ Files already in correct structure for Render.
 
-2️⃣ Create a new Web Service on https://dashboard.render.com/
+On Render Web Service:
+- Build command: pip install -r requirements.txt
+- Start command: uvicorn main:app --host 0.0.0.0 --port 8000
+- Python version: 3.9+
 
-3️⃣ Set the build command:
-    pip install -r requirements.txt
-
-4️⃣ Set the start command:
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-5️⃣ Set Python version to 3.9
-
-6️⃣ Done. Render will automatically pull model from Hugging Face on first launch.
-
-⚠️ Don't forget to update MODEL_URL in main.py with your real Hugging Face model URL.
+IMPORTANT: Update MODEL_URL in main.py with your Hugging Face model file URL.
