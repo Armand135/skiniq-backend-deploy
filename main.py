@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/raw/main/skin_model.pth"
+MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/skin_model.pth"
 MODEL_PATH = "skin_model.pth"
 
 if not os.path.exists(MODEL_PATH):
