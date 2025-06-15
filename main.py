@@ -6,7 +6,7 @@ import torch
 import torchvision.transforms as transforms
 import torch.nn as nn
 import torchvision.models as models
-import requests
+import urllib.request
 import os
 
 app = FastAPI()
@@ -22,17 +22,21 @@ app.add_middleware(
 MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth"
 MODEL_PATH = "skin_model.pth"
 
+# ✅ much safer download: streaming & resume support
 if not os.path.exists(MODEL_PATH):
     print("Downloading model from Hugging Face...")
-    r = requests.get(MODEL_URL)
-    with open(MODEL_PATH, "wb") as f:
-        f.write(r.content)
+    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
 
-model = models.resnet18(pretrained=False)
+# ✅ load model architecture
+model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
 model.fc = nn.Linear(model.fc.in_features, 7)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device("cpu"), weights_only=False))
+
+# ✅ fully safe torch.load
+state_dict = torch.load(MODEL_PATH, map_location="cpu")
+model.load_state_dict(state_dict)
 model.eval()
 
+# ✅ same transform
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
