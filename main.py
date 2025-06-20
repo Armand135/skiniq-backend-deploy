@@ -1,15 +1,4 @@
-@app.post("/analyze-skin/")
-async def analyze_skin(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
-    image_tensor = transform(image).unsqueeze(0)
-
-    with torch.no_grad():
-        outputs = model(image_tensor)
-        probs = torch.nn.functional.softmax(outputs[0], dim=0)
-        top_prob, top_class = torch.max(probs, 0)
-
-    # Grad-CAM logic from Part 3
+def generate_gradcam(image_tensor, model, target_class):
     model.zero_grad()
     features = []
     grads = []
@@ -26,13 +15,12 @@ async def analyze_skin(file: UploadFile = File(...)):
 
     output = model(image_tensor)
     one_hot = torch.zeros((1, output.size()[-1]))
-    one_hot[0][top_class.item()] = 1
+    one_hot[0][target_class] = 1
     output.backward(gradient=one_hot)
 
     gradients = grads[0][0]
     activations = features[0][0]
     weights = torch.mean(gradients, dim=(1, 2))
-    cam = generate_gradcam(image_tensor, model, top_class.item())
     cam = torch.zeros(activations.shape[1:], dtype=torch.float32)
 
     for i, w in enumerate(weights):
@@ -42,6 +30,24 @@ async def analyze_skin(file: UploadFile = File(...)):
     cam = cam / cam.max()
     cam = np.uint8(255 * cam)
     cam = Image.fromarray(cam).resize((224, 224))
+
+    handle_f.remove()
+    handle_b.remove()
+    return cam
+
+@app.post("/analyze-skin/")
+async def analyze_skin(file: UploadFile = File(...)):
+    contents = await file.read()
+    image = Image.open(io.BytesIO(contents)).convert("RGB")
+    image_tensor = transform(image).unsqueeze(0)
+
+    with torch.no_grad():
+        outputs = model(image_tensor)
+        probs = torch.nn.functional.softmax(outputs[0], dim=0)
+        top_prob, top_class = torch.max(probs, 0)
+
+    # ✅ Grad-CAM generation
+    cam = generate_gradcam(image_tensor, model, top_class.item())  # <- this is fixed
     cam = cam.convert("RGBA")
     orig = image.resize((224, 224)).convert("RGBA")
     heatmap = Image.blend(orig, cam, alpha=0.5)
@@ -49,9 +55,6 @@ async def analyze_skin(file: UploadFile = File(...)):
     buffered = io.BytesIO()
     heatmap.save(buffered, format="PNG")
     cam_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-    handle_f.remove()
-    handle_b.remove()
 
     return {
         "condition": CLASS_NAMES[top_class.item()],
