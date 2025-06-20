@@ -1,56 +1,3 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
-import io
-import torch
-import torchvision.transforms as transforms
-import torch.nn as nn
-import torchvision.models as models
-import urllib.request
-import os
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth"
-MODEL_PATH = "skin_model.pth"
-
-# ✅ much safer download: streaming & resume support
-if not os.path.exists(MODEL_PATH):
-    print("Downloading model from Hugging Face...")
-    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-
-# ✅ load model architecture
-model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-model.fc = nn.Linear(model.fc.in_features, 7)
-
-# ✅ fully safe torch.load
-state_dict = torch.load(MODEL_PATH, map_location="cpu")
-model.load_state_dict(state_dict)
-model.eval()
-
-# ✅ same transform
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-])
-
-CLASS_NAMES = [
-    "Melanocytic nevi", "Melanoma", "Benign keratosis",
-    "Basal cell carcinoma", "Actinic keratoses", "Vascular lesions", "Dermatofibroma"
-]
-
-@app.get("/")
-def read_root():
-    return {"message": "SkinIQ Inference API is running."}
-
 @app.post("/analyze-skin/")
 async def analyze_skin(file: UploadFile = File(...)):
     contents = await file.read()
@@ -62,8 +9,52 @@ async def analyze_skin(file: UploadFile = File(...)):
         probs = torch.nn.functional.softmax(outputs[0], dim=0)
         top_prob, top_class = torch.max(probs, 0)
 
+    # Grad-CAM logic from Part 3
+    model.zero_grad()
+    features = []
+    grads = []
+
+    def forward_hook(module, input, output):
+        features.append(output.detach())
+
+    def backward_hook(module, grad_in, grad_out):
+        grads.append(grad_out[0].detach())
+
+    final_conv = model.layer4[1].conv2
+    handle_f = final_conv.register_forward_hook(forward_hook)
+    handle_b = final_conv.register_backward_hook(backward_hook)
+
+    output = model(image_tensor)
+    one_hot = torch.zeros((1, output.size()[-1]))
+    one_hot[0][top_class.item()] = 1
+    output.backward(gradient=one_hot)
+
+    gradients = grads[0][0]
+    activations = features[0][0]
+    weights = torch.mean(gradients, dim=(1, 2))
+    cam = torch.zeros(activations.shape[1:], dtype=torch.float32)
+
+    for i, w in enumerate(weights):
+        cam += w * activations[i, :, :]
+
+    cam = np.maximum(cam.numpy(), 0)
+    cam = cam / cam.max()
+    cam = np.uint8(255 * cam)
+    cam = Image.fromarray(cam).resize((224, 224))
+    cam = cam.convert("RGBA")
+    orig = image.resize((224, 224)).convert("RGBA")
+    heatmap = Image.blend(orig, cam, alpha=0.5)
+
+    buffered = io.BytesIO()
+    heatmap.save(buffered, format="PNG")
+    cam_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    handle_f.remove()
+    handle_b.remove()
+
     return {
         "condition": CLASS_NAMES[top_class.item()],
         "confidence": float(top_prob.item()),
-        "recommendation": "Please consult a dermatologist for confirmation."
+        "recommendation": "Please consult a dermatologist for confirmation.",
+        "gradcam": cam_base64
     }
