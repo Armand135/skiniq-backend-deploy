@@ -32,6 +32,7 @@ async def analyze_skin(file: UploadFile = File(...)):
     gradients = grads[0][0]
     activations = features[0][0]
     weights = torch.mean(gradients, dim=(1, 2))
+    cam = generate_gradcam(image_tensor, model, top_class.item())
     cam = torch.zeros(activations.shape[1:], dtype=torch.float32)
 
     for i, w in enumerate(weights):
