@@ -1,3 +1,53 @@
+from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+import io
+import torch
+import torchvision.transforms as transforms
+import torch.nn as nn
+import torchvision.models as models
+import numpy as np
+import os
+import requests
+import base64
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Define class names
+CLASS_NAMES = [
+    "Melanocytic nevi", "Melanoma", "Benign keratosis",
+    "Basal cell carcinoma", "Actinic keratoses", "Vascular lesions", "Dermatofibroma"
+]
+
+# Image transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
+
+# Load model
+MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth"
+MODEL_PATH = "skin_model.pth"
+
+if not os.path.exists(MODEL_PATH):
+    print("Downloading model...")
+    r = requests.get(MODEL_URL)
+    with open(MODEL_PATH, "wb") as f:
+        f.write(r.content)
+
+model = models.resnet18(pretrained=False)
+model.fc = nn.Linear(model.fc.in_features, 7)
+model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+model.eval()
+
 def generate_gradcam(image_tensor, model, target_class):
     model.zero_grad()
     features = []
@@ -13,6 +63,7 @@ def generate_gradcam(image_tensor, model, target_class):
     handle_f = final_conv.register_forward_hook(forward_hook)
     handle_b = final_conv.register_backward_hook(backward_hook)
 
+    # Forward pass (must NOT be in no_grad)
     output = model(image_tensor)
     one_hot = torch.zeros((1, output.size()[-1]))
     one_hot[0][target_class] = 1
@@ -41,13 +92,13 @@ async def analyze_skin(file: UploadFile = File(...)):
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     image_tensor = transform(image).unsqueeze(0)
 
-    with torch.no_grad():
-        outputs = model(image_tensor)
-        probs = torch.nn.functional.softmax(outputs[0], dim=0)
-        top_prob, top_class = torch.max(probs, 0)
+    # Must be inside eval mode but outside no_grad to trigger hooks
+    outputs = model(image_tensor)
+    probs = torch.nn.functional.softmax(outputs[0], dim=0)
+    top_prob, top_class = torch.max(probs, 0)
 
-    # ✅ Grad-CAM generation
-    cam = generate_gradcam(image_tensor, model, top_class.item())  # <- this is fixed
+    # Grad-CAM generation
+    cam = generate_gradcam(image_tensor, model, top_class.item())
     cam = cam.convert("RGBA")
     orig = image.resize((224, 224)).convert("RGBA")
     heatmap = Image.blend(orig, cam, alpha=0.5)
