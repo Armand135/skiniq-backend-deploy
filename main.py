@@ -87,7 +87,7 @@ async def analyze_skin(file: UploadFile = File(...)):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     image_tensor = transform(image).unsqueeze(0)
-
+    
     outputs = model(image_tensor)
     probs = torch.nn.functional.softmax(outputs[0], dim=0)
     top_prob, top_class = torch.max(probs, 0)
