@@ -107,3 +107,7 @@ async def analyze_skin(file: UploadFile = File(...)):
         "recommendation": "Please consult a dermatologist for confirmation.",
         "gradcam": cam_base64
     }
+
+@app.get("/")
+def root():
+    return {"status": "OK"}
