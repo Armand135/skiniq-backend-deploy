@@ -82,7 +82,7 @@ def generate_gradcam(image_tensor, model, target_class):
     handle_b.remove()
     return cam
 
-@app.post("/analyze-skin/")
+@app.post("/skin/analyze")
 async def analyze_skin(file: UploadFile = File(...)):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert("RGB")
