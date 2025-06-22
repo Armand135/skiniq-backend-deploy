@@ -11,14 +11,6 @@ import os
 import requests
 import base64
 
-await supabase.from('scans').insert([
-  {
-    user_id: user.id,
-    condition: "Melanoma",
-    confidence: 0.92,
-  }
-]);
-
 app = FastAPI()
 
 app.add_middleware(
@@ -29,19 +21,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define class names
 CLASS_NAMES = [
     "Melanocytic nevi", "Melanoma", "Benign keratosis",
     "Basal cell carcinoma", "Actinic keratoses", "Vascular lesions", "Dermatofibroma"
 ]
 
-# Image transform
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
 ])
 
-# Load model
 MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth"
 MODEL_PATH = "skin_model.pth"
 
@@ -71,7 +60,6 @@ def generate_gradcam(image_tensor, model, target_class):
     handle_f = final_conv.register_forward_hook(forward_hook)
     handle_b = final_conv.register_backward_hook(backward_hook)
 
-    # Forward pass (must NOT be in no_grad)
     output = model(image_tensor)
     one_hot = torch.zeros((1, output.size()[-1]))
     one_hot[0][target_class] = 1
@@ -100,12 +88,10 @@ async def analyze_skin(file: UploadFile = File(...)):
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     image_tensor = transform(image).unsqueeze(0)
 
-    # Must be inside eval mode but outside no_grad to trigger hooks
     outputs = model(image_tensor)
     probs = torch.nn.functional.softmax(outputs[0], dim=0)
     top_prob, top_class = torch.max(probs, 0)
 
-    # Grad-CAM generation
     cam = generate_gradcam(image_tensor, model, top_class.item())
     cam = cam.convert("RGBA")
     orig = image.resize((224, 224)).convert("RGBA")
