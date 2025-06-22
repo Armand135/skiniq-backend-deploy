@@ -11,6 +11,14 @@ import os
 import requests
 import base64
 
+await supabase.from('scans').insert([
+  {
+    user_id: user.id,
+    condition: "Melanoma",
+    confidence: 0.92,
+  }
+]);
+
 app = FastAPI()
 
 app.add_middleware(
