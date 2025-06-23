@@ -10,6 +10,7 @@ import numpy as np
 import os
 import requests
 import base64
+import time
 
 app = FastAPI()
 
@@ -81,6 +82,11 @@ def generate_gradcam(image_tensor, model, target_class):
     handle_f.remove()
     handle_b.remove()
     return cam
+
+@app.on_event("startup")
+async def load_model():
+    time.sleep(2)  # Let Render finish initializing
+    print("✅ Backend is ready.")
 
 @app.post("/analyze-skin")
 async def analyze_skin(file: UploadFile = File(...)):
