@@ -90,32 +90,35 @@ async def load_model():
 
 @app.post("/analyze-skin")
 async def analyze_skin(file: UploadFile = File(...)):
-    print(f"✅ Received file: {file.filename}")
-    contents = await file.read()
-    
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
-    image_tensor = transform(image).unsqueeze(0)
+    try:
+        print("📥 Received image file:", file.filename)
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        image_tensor = transform(image).unsqueeze(0)
 
-    
-    outputs = model(image_tensor)
-    probs = torch.nn.functional.softmax(outputs[0], dim=0)
-    top_prob, top_class = torch.max(probs, 0)
+        outputs = model(image_tensor)
+        probs = torch.nn.functional.softmax(outputs[0], dim=0)
+        top_prob, top_class = torch.max(probs, 0)
 
-    cam = generate_gradcam(image_tensor, model, top_class.item())
-    cam = cam.convert("RGBA")
-    orig = image.resize((224, 224)).convert("RGBA")
-    heatmap = Image.blend(orig, cam, alpha=0.5)
+        cam = generate_gradcam(image_tensor, model, top_class.item())
+        cam = cam.convert("RGBA")
+        orig = image.resize((224, 224)).convert("RGBA")
+        heatmap = Image.blend(orig, cam, alpha=0.5)
 
-    buffered = io.BytesIO()
-    heatmap.save(buffered, format="PNG")
-    cam_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        buffered = io.BytesIO()
+        heatmap.save(buffered, format="PNG")
+        cam_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    return {
-        "condition": CLASS_NAMES[top_class.item()],
-        "confidence": float(top_prob.item()),
-        "recommendation": "Please consult a dermatologist for confirmation.",
-        "gradcam": cam_base64
-    }
+        return {
+            "condition": CLASS_NAMES[top_class.item()],
+            "confidence": float(top_prob.item()),
+            "recommendation": "Please consult a dermatologist for confirmation.",
+            "gradcam": cam_base64
+        }
+
+    except Exception as e:
+        print("❌ Backend error:", str(e))
+        return {"error": str(e)}
 
 @app.get("/")
 def root():
