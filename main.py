@@ -89,10 +89,9 @@ async def load_model():
     print("✅ Backend is ready.")
 
 @app.post("/analyze-skin")
-
 async def analyze_skin(file: UploadFile = File(...)):
-    contents = await file.read()
     print(f"✅ Received file: {file.filename}")
+    contents = await file.read()
     
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     image_tensor = transform(image).unsqueeze(0)
