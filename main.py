@@ -22,100 +22,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+CLASS_NAMES = [
+    "Melanocytic nevi", "Melanoma", "Benign keratosis",
+    "Basal cell carcinoma", "Actinic keratoses", "Vascular lesions", "Dermatofibroma"
+]
+
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
 ])
 
-# --- Download & load 3 models ---
-MODELS = {}
-CLASS_MAP = {}
+MODEL_URL = "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth"
+MODEL_PATH = "skin_model.pth"
 
-MODEL_CONFIGS = {
-    "skin_disease": {
-        "url": "https://huggingface.co/Armand345/skiniq-model/resolve/main/skin_model.pth",
-        "path": "skin_model.pth",
-        "classes": [
-            "Melanocytic nevi", "Melanoma", "Benign keratosis",
-            "Basal cell carcinoma", "Actinic keratoses", "Vascular lesions", "Dermatofibroma"
-        ]
-    },
-    "acne": {
-        "url": "https://huggingface.co/Armand345/skiniq-model/resolve/main/acne_model.pth",
-        "path": "acne_model.pth",
-        "classes": ["No acne", "Mild acne", "Moderate acne", "Severe acne"]
-    },
-    "pigmentation": {
-        "url": "https://huggingface.co/Armand345/skiniq-model/resolve/main/pigmentation_model.pth",
-        "path": "pigmentation_model.pth",
-        "classes": ["No pigmentation", "Melasma", "Hyperpigmentation", "Hypopigmentation"]
+if not os.path.exists(MODEL_PATH):
+    print("📥 Downloading skin model...")
+    r = requests.get(MODEL_URL)
+    with open(MODEL_PATH, "wb") as f:
+        f.write(r.content)
 
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import ImageUpload from '../components/ImageUpload';
-import { supabase } from '../supabaseClient';
+model = models.resnet18(pretrained=False)
+model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
+model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+model.eval()
 
-const ScanPage = () => {
-  const [image, setImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+def generate_gradcam(image_tensor, model, target_class):
+    model.zero_grad()
+    features = []
+    grads = []
 
-  useEffect(() => {
-    supabase.auth.getUser()
-      .then(({ data: { user } }) => { if (!user) navigate('/login'); });
-  }, [navigate]);
+    def forward_hook(module, input, output):
+        features.append(output.detach())
 
-  const handleScan = async () => {
-    if (!image) return;
-    setLoading(true);
+    def backward_hook(module, grad_in, grad_out):
+        grads.append(grad_out[0].detach())
 
-    const formData = new FormData();
-    formData.append("file", image);
+    final_conv = model.layer4[1].conv2
+    handle_f = final_conv.register_forward_hook(forward_hook)
+    handle_b = final_conv.register_backward_hook(backward_hook)
 
-    try {
-      console.log("🔍 Sending scan request...");
-      const response = await fetch("https://skiniq-backend-ej69.onrender.com/analyze-skin", {
-        method: "POST",
-        body: formData,
-      });
-      console.log("👉 Response received:", response);
+    output = model(image_tensor)
+    one_hot = torch.zeros((1, output.size()[-1]))
+    one_hot[0][target_class] = 1
+    output.backward(gradient=one_hot)
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status} – ${errorText}`);
-      }
+    gradients = grads[0][0]
+    activations = features[0][0]
+    weights = torch.mean(gradients, dim=(1, 2))
+    cam = torch.zeros(activations.shape[1:], dtype=torch.float32)
 
-      const result = await response.json();
-      console.log("✅ Scan result:", result);
-      localStorage.setItem("scanResult", JSON.stringify(result));
-      navigate('/result');
-    } catch (err) {
-      console.error("❌ Scan failed:", err);
-      alert(`Something went wrong: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-}
+    for i, w in enumerate(weights):
+        cam += w * activations[i, :, :]
 
-def load_model(config):
-    if not os.path.exists(config["path"]):
-        r = requests.get(config["url"])
-        with open(config["path"], "wb") as f:
-            f.write(r.content)
-    model = models.resnet18(pretrained=False)
-    model.fc = nn.Linear(model.fc.in_features, len(config["classes"]))
-    model.load_state_dict(torch.load(config["path"], map_location="cpu"))
-    model.eval()
-    return model
+    cam = np.maximum(cam.numpy(), 0)
+    cam = cam / cam.max()
+    cam = np.uint8(255 * cam)
+    cam = Image.fromarray(cam).resize((224, 224))
 
-for name, config in MODEL_CONFIGS.items():
-    MODELS[name] = load_model(config)
-    CLASS_MAP[name] = config["classes"]
+    handle_f.remove()
+    handle_b.remove()
+    return cam
 
 @app.on_event("startup")
-async def init():
+async def startup_event():
     time.sleep(2)
-    print("✅ All models loaded and backend is ready.")
+    print("✅ Backend is ready.")
 
 @app.post("/analyze-skin")
 async def analyze_skin(file: UploadFile = File(...)):
@@ -124,26 +95,26 @@ async def analyze_skin(file: UploadFile = File(...)):
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         tensor = transform(image).unsqueeze(0)
 
-        best_result = None
+        with torch.no_grad():
+            output = model(tensor)
+            probs = torch.nn.functional.softmax(output[0], dim=0)
+            top_prob, top_class = torch.max(probs, 0)
 
-        for model_name, model in MODELS.items():
-            with torch.no_grad():
-                output = model(tensor)
-                probs = torch.nn.functional.softmax(output[0], dim=0)
-                top_prob, top_class = torch.max(probs, 0)
-                class_name = CLASS_MAP[model_name][top_class.item()]
+        cam = generate_gradcam(tensor, model, top_class.item())
+        cam = cam.convert("RGBA")
+        orig = image.resize((224, 224)).convert("RGBA")
+        heatmap = Image.blend(orig, cam, alpha=0.5)
 
-                result = {
-                    "model": model_name,
-                    "condition": class_name,
-                    "confidence": float(top_prob.item()),
-                    "recommendation": "Please consult a dermatologist for confirmation."
-                }
+        buffered = io.BytesIO()
+        heatmap.save(buffered, format="PNG")
+        cam_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-                if best_result is None or result["confidence"] > best_result["confidence"]:
-                    best_result = result
-
-        return best_result
+        return {
+            "condition": CLASS_NAMES[top_class.item()],
+            "confidence": float(top_prob.item()),
+            "recommendation": "Please consult a dermatologist for confirmation.",
+            "gradcam": cam_base64
+        }
 
     except Exception as e:
         print("❌ Backend error:", str(e))
@@ -152,33 +123,3 @@ async def analyze_skin(file: UploadFile = File(...)):
 @app.get("/")
 def root():
     return {"status": "OK"}
-
-  };
-
-  return (
-    <div style={{ fontFamily: 'Segoe UI', padding: '2rem', textAlign: 'center', maxWidth: '600px', margin: 'auto' }}>
-      <h1 style={{ fontSize: '2.5rem', color: '#006E3C' }}>AI‑Powered Skin Scan</h1>
-      <ImageUpload image={image} setImage={setImage} />
-      <button
-        onClick={handleScan}
-        disabled={!image || loading}
-        style={{
-          marginTop: '2rem',
-          padding: '1rem 2rem',
-          fontSize: '1rem',
-          background: '#28a745',
-          color: 'white',
-          border: 'none',
-          borderRadius: '5px',
-          cursor: image && !loading ? 'pointer' : 'not-allowed',
-          opacity: image && !loading ? 1 : 0.6
-        }}
-      >
-        {loading ? 'Analyzing…' : 'Analyze'}
-      </button>
-      <p style={{ marginTop: '2rem', color: '#777' }}>📸 Tip: good lighting = better results.</p>
-    </div>
-  );
-};
-
-export default ScanPage;
