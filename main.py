@@ -15,11 +15,15 @@ import time
 app = FastAPI()
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://skiniq-frontend.vercel.app"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+      CORSMiddleware,
+      allow_origins=[
+          "https://skiniq-frontend.vercel.app",
+          "https://*.vercel.app",
+          "https://curly-halibut-vwv6gvgrjjjhwgxj-5173.app.github.dev"
+      ],
+      allow_credentials=True,
+      allow_methods=["*"],
+      allow_headers=["*"],
 )
 
 CLASS_NAMES = [
