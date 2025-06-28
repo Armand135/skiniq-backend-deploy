@@ -20,7 +20,7 @@ app.add_middleware(
           "https://skiniq-frontend.vercel.app",
           "https://*.vercel.app",
           "https://curly-halibut-vwv6gvgrjjjhwgxj-5173.app.github.dev",
-          "https://www.skiniq.io"
+          "https://skiniq.io"
       ],
       allow_credentials=True,
       allow_methods=["*"],
